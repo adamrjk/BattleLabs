@@ -241,7 +241,7 @@ class UIInstance(
           ),
           div(cls := "button-container",
             a(
-              href := "http://localhost:8080/",
+              href := "/",
               cls := "home-button",
               "Back to home page"
             ),
