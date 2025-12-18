@@ -25,16 +25,26 @@ object MainJVM:
   val proxyClients = new ConcurrentHashMap[Int, LoadBalancingProxyClient]()
 
   def main(args: Array[String]): Unit =
+    // BYPASSING LOBBY FOR LOCAL PLAY
+    println("Bypassing Lobby - Starting Game Server directly...")
+    GameServer.start()
+    
+    /*
     if (args.contains("--internal")) {
       startInternalServer()
     } else {
       startLobbyServer()
     }
+    */
 
   def startInternalServer(): Unit =
     // The library expects WEBAPPLIB_PORT env var or property, we set it in the process builder env
     // But just in case, we can verify or print it
     val port = System.getenv("WEBAPPLIB_PORT")
+    if (port != null) {
+      System.setProperty("WEBAPPLIB_PORT", port)
+    }
+    
     println(s"[Internal] Starting Game Server on port $port...")
     GameServer.start()
 
@@ -83,11 +93,6 @@ object MainJVM:
              if (path == "/") {
                serveLobby(exchange)
              } else {
-                // If the user requests /static/something but has no cookie and no param,
-                // it implies they might be lost or the cookie expired.
-                // However, the lobby itself might need static assets?
-                // The current lobby is self-contained HTML.
-                // So we can safely 404 or redirect to /
                 exchange.setStatusCode(404)
                 exchange.getResponseSender.send("Not Found / No Game Session")
              }
@@ -128,12 +133,21 @@ object MainJVM:
     // Spawn Process
     try {
       val classpath = System.getProperty("java.class.path")
-      println(s"[Lobby] Spawning game on port $port with classpath length ${classpath.length}")
-      
-      val pb = new ProcessBuilder("java", "-Xmx100m", s"-DWEBAPPLIB_PORT=$port", "-cp", classpath, "apps.MainJVM", "--internal")
+      println(s"[Lobby] Spawning game on port $port. CP length: ${classpath.length}")
+
+      val pb = if (classpath.endsWith(".jar") && !classpath.contains(java.io.File.pathSeparator)) {
+          // Running as a unified JAR (e.g. Fly.io deployment)
+          println(s"[Lobby] Detected JAR execution. Launching via -jar $classpath")
+          new ProcessBuilder("java", "-Xmx100m", s"-DWEBAPPLIB_PORT=$port", "-jar", classpath, "--internal")
+      } else {
+          // Running via Classpath (e.g. local sbt / dev)
+          println(s"[Lobby] Detected Classpath execution.")
+          new ProcessBuilder("java", "-Xmx100m", s"-DWEBAPPLIB_PORT=$port", "-cp", classpath, "apps.MainJVM", "--internal")
+      }
+
       val env = pb.environment()
       env.put("WEBAPPLIB_PORT", port.toString)
-      env.put("PORT", port.toString) // Some frameworks look for PORT
+      env.put("PORT", port.toString) 
       pb.inheritIO()
       
       val process = pb.start()
@@ -142,17 +156,21 @@ object MainJVM:
       // Wait for server to come online
       var attempts = 0
       var connected = false
-      while (attempts < 50 && !connected) { 
+      val maxAttempts = 300 // 30 seconds
+      
+      while (attempts < maxAttempts && !connected) { 
         if (!process.isAlive) {
             println(s"[Lobby] Game process died prematurely with exit code ${process.exitValue()}")
-            attempts = 100 // Break loop
+            attempts = maxAttempts + 1 // Break loop
         } else {
             try {
               Thread.sleep(100)
               new java.net.Socket("localhost", port).close()
               connected = true
             } catch {
-              case _: Exception => attempts += 1
+              case e: Exception => 
+                attempts += 1
+                if (attempts % 10 == 0) println(s"[Lobby] Waiting for port $port... (${e.getClass.getName}: ${e.getMessage})")
             }
         }
       }
@@ -161,19 +179,22 @@ object MainJVM:
          if (process.isAlive) process.destroy()
          activeGames.remove(id)
          exchange.setStatusCode(504)
-         exchange.getResponseSender.send("""{"error": "Game server timed out or crashed"}""")
+         exchange.getResponseSender.send(s"Game server timed out after ${maxAttempts/10} seconds or crashed")
          return
       }
       
       println(s"[Lobby] Game $id started on port $port")
-      val json = s"""{"id": "$id"}"""
-      exchange.getResponseHeaders.put(Headers.CONTENT_TYPE, "application/json")
-      exchange.getResponseSender.send(json)
+      
+      // Perform 302 Redirect
+      exchange.setStatusCode(302)
+      exchange.getResponseHeaders.put(Headers.LOCATION, s"/?gameId=$id")
+      exchange.endExchange()
+      
     } catch {
       case e: Exception =>
         e.printStackTrace()
         exchange.setStatusCode(500)
-        exchange.getResponseSender.send("Failed to start game process: " + e.getMessage)
+        exchange.getResponseSender.send(s"Failed to start game process: ${e.getMessage}")
     }
 
   def handleListGames(exchange: HttpServerExchange): Unit =
@@ -219,7 +240,9 @@ object MainJVM:
 <body>
     <h1>Battle Labs Lobby</h1>
     <div class="container" id="main-menu">
-        <button onclick="createGame()">Create Game</button>
+        <form action="/api/create" method="post" onsubmit="document.getElementById('create-btn').innerText = 'Creating...'; document.getElementById('create-btn').disabled = true;">
+            <button id="create-btn" type="submit">Create Game</button>
+        </form>
         <button class="secondary" onclick="showJoin()">Join Game</button>
     </div>
 
@@ -230,16 +253,6 @@ object MainJVM:
     </div>
 
     <script>
-        function createGame() {
-            fetch('/api/create', { method: 'POST' })
-                .then(r => r.json())
-                .then(data => {
-                    if (data.error) { alert(data.error); return; }
-                    window.location.href = '/?gameId=' + data.id;
-                })
-                .catch(e => alert('Failed to create game'));
-        }
-
         function showJoin() {
             document.getElementById('main-menu').classList.add('hidden');
             document.getElementById('join-menu').classList.remove('hidden');
