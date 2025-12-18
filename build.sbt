@@ -3,6 +3,15 @@ val commonSettings = Seq(
     scalacOptions ++= List("-deprecation", "-feature", "-Xfatal-warnings")
 )
 
+val customMergeStrategy: String => sbtassembly.MergeStrategy = {
+  case sbtassembly.PathList("META-INF", "MANIFEST.MF") => sbtassembly.MergeStrategy.discard
+  case x if x.endsWith(".tasty")     => sbtassembly.MergeStrategy.first
+  case x if x.endsWith(".class")     => sbtassembly.MergeStrategy.first
+  case x if x.endsWith(".html")      => sbtassembly.MergeStrategy.concat
+  case x if x.endsWith(".js")        => sbtassembly.MergeStrategy.first
+  case _                             => sbtassembly.MergeStrategy.first
+}
+
 /// Dependencies
 
 val webappLibRepo = uri("https://gitlab.epfl.ch/cs214/ul2024/webapp-lib.git#v0.27.0")
@@ -50,9 +59,7 @@ lazy val app = (crossProject(JVMPlatform, JSPlatform) in file("./apps"))
     )
   ).jvmSettings(
     assembly / assemblyJarName := "webapp.jar",
-    assembly / assemblyMergeStrategy := {
-      case _ => sbtassembly.MergeStrategy.first
-    },
+    assembly / assemblyMergeStrategy := customMergeStrategy,
     assembly / mainClass := Some("apps.MainJVM"),
     run / fork := true,
     Global / cancelable := true,
@@ -71,7 +78,9 @@ lazy val webappApp = (project in file("."))
     appJS, appJVM,
   ).settings(
     name := "webappApp",
-    commonSettings
+    commonSettings,
+    assembly / aggregate := false,
+    assembly / assemblyMergeStrategy := customMergeStrategy
   ).settings(
     copyJsTask := copyJsTaskFactory(true).value,
     Test / test := Def.sequential(
