@@ -1,0 +1,11 @@
+.git
+.gitignore
+.dockerignore
+.DS_Store
+.metals
+.vscode
+**/target
+**/.bloop
+node_modules
+submission.bundle
+mockups
