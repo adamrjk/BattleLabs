@@ -8,6 +8,11 @@ primary_region = 'iad'
 
 [build]
 
+[env]
+  WEBAPPLIB_HOST = "0.0.0.0"
+  WEBAPPLIB_PORT = "8080"
+  WEBAPPLIB_PUBLIC_INSTANCE = "1"
+
 [http_service]
   internal_port = 8080
   force_https = true
