@@ -87,9 +87,9 @@ lazy val app = (crossProject(JVMPlatform, JSPlatform) in file("./apps"))
   .jvmSettings(
     assembly / assemblyJarName := "webapp.jar",
     assembly / assemblyMergeStrategy := customMergeStrategy,
-    // assembly / mainClass := Some("apps.MainJVM"),
-    // Compile / mainClass := Some("apps.MainJVM"),
-    // Compile / run / mainClass := Some("apps.MainJVM"),
+    assembly / mainClass := Some("apps.MainJVM"),
+    Compile / mainClass := Some("apps.MainJVM"),
+    Compile / run / mainClass := Some("apps.MainJVM"),
     run / fork := true,
     Global / cancelable := true,
     libraryDependencies ++= Seq(
